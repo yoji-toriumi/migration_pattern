@@ -1,0 +1,179 @@
+---
+title: "migration_pattern"
+author: "Yoji"
+date: "3/8/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(sf)
+library(migest)
+library(mapdeck)
+library(mapview)
+```
+
+```{r}
+# import migration data and clean it
+migration <- read.csv("undesa_pd_2020_ims_stock_by_sex_destination_and_origin.csv")
+migration <- migration %>% 
+  slice(-1:-10) %>% 
+  select(-3, -5)
+colnames(migration) <- c("index", "des_country", "des_id", "ori_country", "ori_id", "t_1990", "t_1995", "t_2000", "t_2005", "t_2010", "t_2015", "t_2020", "m_1990", "m_1995", "m_2000", "m_2005", "m_2010", "m_2015", "m_2020", "f_1990", "f_1995", "f_2000", "f_2005", "f_2010", "f_2015", "f_2020")
+
+# replace NA value in years to 0
+migration <- mutate_at(migration, 6:26, ~replace(., is.na(.), 0))
+
+# clear spaces and make it numeric data
+for (i in 6:26) {
+  migration[, i] <- gsub(" ", "", migration[, i])
+  migration[, i] <- as.numeric(migration[, i])
+}
+
+# add "0" to country ids to make them three digits or more
+migration$des_id <- str_pad(migration$des_id, 3, pad=0)
+migration$ori_id <- str_pad(migration$ori_id, 3, pad=0)
+```
+
+```{r}
+sf::sf_use_s2(FALSE)
+
+world_boundary <- read_sf("IPUMSI_world_release2020/world_countries_2020.shp") %>% 
+  st_transform("WGS84")
+
+# omit disputed area
+world_boundary <- world_boundary %>% 
+  slice(-3, -31:-35, -69, -78:-85, -89, -107, -122, -135:-136, -146, -159, -189, -202:-204, -209, -228:-231, -282)
+
+# centroid country geometry
+world_centroid <- st_centroid(world_boundary)
+
+# convert geometry to longitude and latitude
+world_centroid_xy <- st_as_sf(world_centroid$geometry, coords = c("x", "y"))
+world_centroid_xy <- world_centroid %>% extract(geometry, c('lon', 'lat'), '\\((.*), (.*)\\)', convert = TRUE) 
+world_centroid_xy <- world_centroid_xy %>% 
+  select(-1:-2, -4, -5, -8)
+
+migration_point <- left_join(migration, world_centroid_xy, by = c("des_id" = "CNTRY_CODE"))
+migration_point <- left_join(migration_point, world_centroid_xy, by = c("ori_id" = "CNTRY_CODE"))
+colnames(migration_point) <- c("index", "des_country", "des_id", "ori_country", "ori_id", "t_1990", "t_1995", "t_2000", "t_2005", "t_2010", "t_2015", "t_2020", "m_1990", "m_1995", "m_2000", "m_2005", "m_2010", "m_2015", "m_2020", "f_1990", "f_1995", "f_2000", "f_2005", "f_2010", "f_2015", "f_2020", "des_long", "des_lat", "ori_long", "ori_lat")
+
+# omit rows contain NA value
+migration_point <- na.omit(migration_point)
+
+# save the data frame as table
+write.table(migration_point, file = "migration_point.txt", sep = ",", row.names = FALSE, col.names = TRUE)
+```
+
+
+```{r}
+# make polygon data
+
+# first, sumup migration data to each country
+migration_ori_summary <- migration %>% 
+  group_by(ori_id) %>% 
+  summarise(ot_1990 = sum(m_1990, na.rm = TRUE), ot_1995 = sum(t_1995, na.rm = TRUE), ot_2000 = sum(t_2000, na.rm = TRUE), ot_2005 = sum(t_2005, na.rm = TRUE), ot_2010 = sum(t_2010, na.rm = TRUE), ot_2015 = sum(t_2015, na.rm = TRUE), ot_2020 = sum(t_2020, na.rm = TRUE), of_1990 = sum(f_1990, na.rm = TRUE), of_1995 = sum(f_1995, na.rm = TRUE), of_2000 = sum(f_2000, na.rm = TRUE), of_2005 = sum(f_2005, na.rm = TRUE), of_2010 = sum(f_2010, na.rm = TRUE), of_2015 = sum(f_2015, na.rm = TRUE), of_2020 = sum(f_2020, na.rm = TRUE), om_1990 = sum(m_1990, na.rm = TRUE), om_1995 = sum(m_1995, na.rm = TRUE), om_2000 = sum(m_2000, na.rm = TRUE), om_2005 = sum(m_2005, na.rm = TRUE), om_2010 = sum(m_2010, na.rm = TRUE), om_2015 = sum(m_2015, na.rm = TRUE), om_2020 = sum(m_2020, na.rm = TRUE))
+
+migration_des_summary <- migration %>% 
+  group_by(des_id) %>% 
+  summarise(dt_1990 = sum(t_1990, na.rm = TRUE), dt_1995 = sum(t_1995, na.rm = TRUE), dt_2000 = sum(t_2000, na.rm = TRUE), dt_2005 = sum(t_2005, na.rm = TRUE), dt_2010 = sum(t_2010, na.rm = TRUE), dt_2015 = sum(t_2015, na.rm = TRUE), dt_2020 = sum(t_2020, na.rm = TRUE), df_1990 = sum(f_1990, na.rm = TRUE), df_1995 = sum(f_1995, na.rm = TRUE), df_2000 = sum(f_2000, na.rm = TRUE), df_2005 = sum(f_2005, na.rm = TRUE), df_2010 = sum(f_2010, na.rm = TRUE), df_2015 = sum(f_2015, na.rm = TRUE), df_2020 = sum(f_2020, na.rm = TRUE), dm_1990 = sum(m_1990, na.rm = TRUE), dm_1995 = sum(m_1995, na.rm = TRUE), dm_2000 = sum(m_2000, na.rm = TRUE), dm_2005 = sum(m_2005, na.rm = TRUE), dm_2010 = sum(m_2010, na.rm = TRUE), dm_2015 = sum(m_2015, na.rm = TRUE), dm_2020 = sum(m_2020, na.rm = TRUE))
+
+migration_summary <- left_join(migration_ori_summary, migration_des_summary, by = c("ori_id" = "des_id"))
+
+# join world boundary data to migration data
+migration_polygon <- left_join(migration_summary, world_boundary, by = c("ori_id" = "CNTRY_CODE")) %>% 
+  select(-44, -46)
+
+# omit na values
+migration_polygon <- na.omit(migration_polygon)
+
+st_write(migration_polygon, "migration_polygon.shp")
+```
+
+```{r}
+# visualize migration flow using "migest" package
+
+# remove spaces before character
+migration$des_country <- migration$des_country %>% 
+  trimws("l")
+migration$ori_country <- migration$ori_country %>% 
+  trimws("l")
+
+# focus on regional data except "Oceania (excluding Australia and New Zealand)"
+migration_region <- migration %>%
+  filter(
+    des_country %in% c(
+      "Sub-Saharan Africa",
+      "Northern Africa and Western Asia",
+      "Central and Southern Asia",
+      "Eastern and South-Eastern Asia",
+      "Latin America and the Caribbean",
+      "Australia and New Zealand",
+      "Europe and Northern America"
+    ),
+    ori_country %in% c(
+      "Sub-Saharan Africa",
+      "Northern Africa and Western Asia",
+      "Central and Southern Asia",
+      "Eastern and South-Eastern Asia",
+      "Latin America and the Caribbean",
+      "Australia and New Zealand",
+      "Europe and Northern America"
+    )
+  ) %>% select(2, 4, 12)
+
+# prepare strings for visualization
+r <- migration_region %>%
+  mutate(lab = str_wrap_n(string = ori_country, n = 2)) %>% 
+  separate(col = lab, into = c("lab1", "lab2"), sep = "\n", remove = FALSE, fill = "right")
+
+# visualize migration data
+mig_chord(
+  x = migration_region,lab_bend1 = r %>% 
+    select(ori_country, lab1) %>% deframe(),
+  lab_bend2 = r %>% 
+    select(ori_country, lab2) %>% deframe(),
+  label_size = 0.8,
+   grid.col = c("#55efc4", "#81ecec", "#74b9ff", "#a29bfe", "#ffeaa7", "#fab1a0", "#fd79a8")
+)
+dev.copy2pdf(file = "migration_region.pdf", height=10, width=10)
+```
+
+```{r}
+# visualize animated migration flow using "mapdeck" package
+
+migration_flow <- left_join(migration, world_centroid, by = c("des_id" = "CNTRY_CODE"))
+migration_flow <- left_join(migration_flow, world_centroid, by = c("ori_id" = "CNTRY_CODE")) %>% 
+  select(-27:-29, -31:-33)
+colnames(migration_flow) <- c("index", "des_country", "des_id", "ori_country", "ori_id", "t_1990", "t_1995", "t_2000", "t_2005", "t_2010", "t_2015", "t_2020", "m_1990", "m_1995", "m_2000", "m_2005", "m_2010", "m_2015", "m_2020", "f_1990", "f_1995", "f_2000", "f_2005", "f_2010", "f_2015", "f_2020", "des_geometry", "ori_geometry")
+migration_flow <- na.omit(migration_flow) %>% 
+  st_as_sf()
+
+migration_flow$number <- migration_flow$t_2020 / 250000
+
+key <- 'abc'    ## put your own token here
+mapdeck(token = key)
+
+migration_flow <- migration_point %>% 
+  mutate(dots = log(t_2020 / 250000), radius = t_2020 / 25)
+
+palette <- matrix(data = c(224,224,224, 229,255,204, 255,255,204, 255,229,204, 255,204,204), nrow = 5, ncol = 3, byrow = TRUE)
+
+# migration_mapdeck <- 
+  migration_flow %>% filter(t_2020 > 250000) %>% mapdeck(style = mapdeck_style("dark")) %>% 
+  add_animated_line(
+    origin = c("ori_long", "ori_lat"),
+    destination = c("des_long", "des_lat"),
+    stroke_width = 4,
+    stroke_colour = "dots",
+    palette = palette,
+    trail_length = 0.07,
+    frequency = "dots",
+    animation_speed = 0.2
+  ) %>% 
+    add_scatterplot(lon = "ori_long", lat = "ori_lat", radius = "radius", layer_id = "scatter_layer", fill_colour = "#ffffff")
+
+mapshot(migration_mapdeck, "migration_mapdeck.html")
+```
+
+
