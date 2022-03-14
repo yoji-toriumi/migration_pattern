@@ -149,18 +149,29 @@ colnames(migration_flow) <- c("index", "des_country", "des_id", "ori_country", "
 migration_flow <- na.omit(migration_flow) %>% 
   st_as_sf()
 
-migration_flow$number <- migration_flow$t_2020 / 250000
-
 key <- 'abc'    ## put your own token here
 mapdeck(token = key)
 
 migration_flow <- migration_point %>% 
-  mutate(dots = log(t_2020 / 250000), radius = t_2020 / 25)
+  mutate(dots = log(t_2020 / 250000))
+
+migration_ori_volume <- migration_flow %>% 
+  group_by(ori_id) %>% 
+  summarise(ori_volume = sum(t_2020))
+
+migration_des_volume <- migration_flow %>% 
+  group_by(des_id) %>% 
+  summarise(des_volume = sum(t_2020)) 
+
+migration_volume <- left_join(migration_ori_volume, migration_des_volume, by = c("ori_id" = "des_id"), keep = TRUE)
+migration_volume <- left_join(migration_volume, world_centroid_xy, by = c("ori_id" = "CNTRY_CODE"), keep = TRUE) %>% 
+  mutate(volume = (ori_volume + des_volume) / 50)
 
 palette <- matrix(data = c(224,224,224, 229,255,204, 255,255,204, 255,229,204, 255,204,204), nrow = 5, ncol = 3, byrow = TRUE)
 
-# migration_mapdeck <- 
+migration_mapdeck <-  
   migration_flow %>% filter(t_2020 > 250000) %>% mapdeck(style = mapdeck_style("dark")) %>% 
+  add_scatterplot(data = migration_volume, lon = "lon", lat = "lat", radius = "volume", layer_id = "scatter_layer", fill_colour = "#ffffff") %>% 
   add_animated_line(
     origin = c("ori_long", "ori_lat"),
     destination = c("des_long", "des_lat"),
@@ -170,8 +181,7 @@ palette <- matrix(data = c(224,224,224, 229,255,204, 255,255,204, 255,229,204, 2
     trail_length = 0.07,
     frequency = "dots",
     animation_speed = 0.2
-  ) %>% 
-    add_scatterplot(lon = "ori_long", lat = "ori_lat", radius = "radius", layer_id = "scatter_layer", fill_colour = "#ffffff")
+  ) 
 
 mapshot(migration_mapdeck, "migration_mapdeck.html")
 ```
